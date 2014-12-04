@@ -29,7 +29,6 @@ import org.apache.spark.serializer.Serializer
 
 import scala.reflect.ClassTag
 
-
 /**
  * Stores data in a single on-disk directory with one file per application and worker.
  * Files are deleted when applications and workers are removed.
