@@ -20,10 +20,15 @@ package org.apache.spark.deploy.master
 import java.io._
 import java.nio.ByteBuffer
 
+import scala.reflect.ClassTag
+
+import akka.serialization.Serialization
+
 import org.apache.spark.Logging
 import org.apache.spark.serializer.Serializer
 
 import scala.reflect.ClassTag
+
 
 /**
  * Stores data in a single on-disk directory with one file per application and worker.
@@ -58,6 +63,8 @@ private[spark] class FileSystemPersistenceEngine(
     if (!created) { throw new IllegalStateException("Could not create file: " + file) }
 
     val out = serializer.serializeStream(new FileOutputStream(file))   
+    val serializer = serialization.findSerializerFor(value)
+    val serialized = serializer.toBinary(value)
     try {
       out.writeObject(value)
     } finally {
@@ -66,7 +73,7 @@ private[spark] class FileSystemPersistenceEngine(
 
   }
 
-  def deserializeFromFile[T](file: File): T = {
+  private def deserializeFromFile[T](file: File)(implicit m: ClassTag[T]): T = {
     val fileData = new Array[Byte](file.length().asInstanceOf[Int])
     val dis = new DataInputStream(new FileInputStream(file))
     try {
@@ -74,7 +81,9 @@ private[spark] class FileSystemPersistenceEngine(
     } finally {
       dis.close()
     }
-
+    val clazz = m.runtimeClass.asInstanceOf[Class[T]]
+    val serializer = serialization.serializerFor(clazz)
     serializer.deserializeStream(dis).readObject()
   }
+
 }

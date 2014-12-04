@@ -20,6 +20,8 @@ package org.apache.spark.deploy.master
 import org.apache.spark.{Logging, SparkConf}
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.serializer.JavaSerializer
+import akka.serialization.Serialization
+
 
 /**
  * ::DeveloperApi::
@@ -29,7 +31,7 @@ import org.apache.spark.serializer.JavaSerializer
  *
  */
 @DeveloperApi
-abstract class StandaloneRecoveryModeFactory(conf: SparkConf) {
+abstract class StandaloneRecoveryModeFactory(conf: SparkConf, serializer: Serialization) {
 
   /**
    * PersistenceEngine defines how the persistent data(Information about worker, driver etc..)
@@ -48,21 +50,21 @@ abstract class StandaloneRecoveryModeFactory(conf: SparkConf) {
  * LeaderAgent in this case is a no-op. Since leader is forever leader as the actual
  * recovery is made by restoring from filesystem.
  */
-private[spark] class FileSystemRecoveryModeFactory(conf: SparkConf)
-  extends StandaloneRecoveryModeFactory(conf) with Logging {
+private[spark] class FileSystemRecoveryModeFactory(conf: SparkConf, serializer: Serialization)
+  extends StandaloneRecoveryModeFactory(conf, serializer) with Logging {
   val RECOVERY_DIR = conf.get("spark.deploy.recoveryDirectory", "")
 
   def createPersistenceEngine() = {
     logInfo("Persisting recovery state to directory: " + RECOVERY_DIR)
-    new FileSystemPersistenceEngine(RECOVERY_DIR, new JavaSerializer(conf))
+    new FileSystemPersistenceEngine(RECOVERY_DIR, serializer)
   }
 
   def createLeaderElectionAgent(master: LeaderElectable) = new MonarchyLeaderAgent(master)
 }
 
-private[spark] class ZooKeeperRecoveryModeFactory(conf: SparkConf)
-  extends StandaloneRecoveryModeFactory(conf) {
-  def createPersistenceEngine() = new ZooKeeperPersistenceEngine(new JavaSerializer(conf), conf)
+private[spark] class ZooKeeperRecoveryModeFactory(conf: SparkConf, serializer: Serialization)
+  extends StandaloneRecoveryModeFactory(conf, serializer) {
+  def createPersistenceEngine() = new ZooKeeperPersistenceEngine(conf, serializer)
 
   def createLeaderElectionAgent(master: LeaderElectable) =
     new ZooKeeperLeaderElectionAgent(master, conf)

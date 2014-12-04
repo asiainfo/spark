@@ -17,7 +17,10 @@
 
 package org.apache.spark.deploy.master
 
+import akka.serialization.Serialization
+
 import scala.collection.JavaConversions._
+import scala.reflect.ClassTag
 
 import org.apache.curator.framework.CuratorFramework
 import org.apache.zookeeper.CreateMode
@@ -29,7 +32,7 @@ import java.nio.ByteBuffer
 import scala.reflect.ClassTag
 
 
-private[spark] class ZooKeeperPersistenceEngine(val serialization: Serializer, conf: SparkConf)
+private[spark] class ZooKeeperPersistenceEngine(conf: SparkConf, val serialization: Serialization)
   extends PersistenceEngine
   with Logging
 {
@@ -63,7 +66,7 @@ private[spark] class ZooKeeperPersistenceEngine(val serialization: Serializer, c
     zk.create().withMode(CreateMode.PERSISTENT).forPath(path, serialized.array())
   }
 
-  def deserializeFromFile[T](filename: String): Option[T] = {
+  def deserializeFromFile[T](filename: String)(implicit m: ClassTag[T]): Option[T] = {
     val fileData = zk.getData().forPath(WORKING_DIR + "/" + filename)
     try {
       Some(serializer.deserialize(ByteBuffer.wrap(fileData)))
