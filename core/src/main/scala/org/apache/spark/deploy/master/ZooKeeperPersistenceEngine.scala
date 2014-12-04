@@ -39,8 +39,6 @@ private[spark] class ZooKeeperPersistenceEngine(conf: SparkConf, val serializati
   val WORKING_DIR = conf.get("spark.deploy.zookeeper.dir", "/spark") + "/master_status"
   val zk: CuratorFramework = SparkCuratorUtil.newClient(conf)
 
-  val serializer = serialization.newInstance()
-
   SparkCuratorUtil.mkdir(zk, WORKING_DIR)
 
 
@@ -62,14 +60,17 @@ private[spark] class ZooKeeperPersistenceEngine(conf: SparkConf, val serializati
   }
 
   private def serializeIntoFile(path: String, value: AnyRef) {
-    val serialized = serializer.serialize(value)
-    zk.create().withMode(CreateMode.PERSISTENT).forPath(path, serialized.array())
+    val serializer = serialization.findSerializerFor(value)
+    val serialized = serializer.toBinary(value)
+    zk.create().withMode(CreateMode.PERSISTENT).forPath(path, serialized)
   }
 
   def deserializeFromFile[T](filename: String)(implicit m: ClassTag[T]): Option[T] = {
     val fileData = zk.getData().forPath(WORKING_DIR + "/" + filename)
+    val clazz = m.runtimeClass.asInstanceOf[Class[T]]
+    val serializer = serialization.serializerFor(clazz)
     try {
-      Some(serializer.deserialize(ByteBuffer.wrap(fileData)))
+      Some(serializer.fromBinary(fileData).asInstanceOf[T])
     } catch {
       case e: Exception => {
         logWarning("Exception while reading persisted file, deleting", e)

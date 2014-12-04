@@ -38,10 +38,9 @@ import scala.reflect.ClassTag
  */
 private[spark] class FileSystemPersistenceEngine(
     val dir: String,
-    val serialization: Serializer)
+    val serialization: Serialization)
   extends PersistenceEngine with Logging {
 
-  val serializer = serialization.newInstance()
   new File(dir).mkdir()
 
   override def persist(name: String, obj: Object): Unit = {
@@ -60,16 +59,14 @@ private[spark] class FileSystemPersistenceEngine(
   private def serializeIntoFile(file: File, value: AnyRef) {
     val created = file.createNewFile()
     if (!created) { throw new IllegalStateException("Could not create file: " + file) }
-
-    val out = serializer.serializeStream(new FileOutputStream(file))   
     val serializer = serialization.findSerializerFor(value)
     val serialized = serializer.toBinary(value)
+    val out = new FileOutputStream(file)
     try {
-      out.writeObject(value)
+      out.write(serialized)
     } finally {
       out.close()
     }
-
   }
 
   private def deserializeFromFile[T](file: File)(implicit m: ClassTag[T]): T = {
@@ -82,7 +79,7 @@ private[spark] class FileSystemPersistenceEngine(
     }
     val clazz = m.runtimeClass.asInstanceOf[Class[T]]
     val serializer = serialization.serializerFor(clazz)
-    serializer.deserializeStream(dis).readObject()
+    serializer.fromBinary(fileData).asInstanceOf[T]
   }
 
 }
