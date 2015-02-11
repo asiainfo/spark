@@ -226,20 +226,15 @@ class HiveContext(sc: SparkContext) extends SQLContext(sc) {
    *    SQLConf.  Additionally, any properties set by set() or a SET command inside sql() will be
    *    set in the SQLConf *as well as* in the HiveConf.
    */
-  @transient lazy val currentSessionState = new ThreadLocal[SessionState]() {
-    override def initialValue(): SessionState = {
-      Option(SessionState.get()).orElse {
-        val state = new SessionState(new HiveConf(classOf[SessionState]))
-        SessionState.start(state)
-        setConf(state.getConf.getAllProperties)
-        if (state.out == null) state.out = new PrintStream(outputBuffer, true, "UTF-8")
-        if (state.err == null) state.err = new PrintStream(outputBuffer, true, "UTF-8")
-        Some(state)
-      }.get
-    }
-  }
 
-  def sessionState = currentSessionState.get()
+  def sessionState = Option(SessionState.get()).orElse {
+    val state = new SessionState(new HiveConf(classOf[SessionState]))
+    SessionState.start(state)
+    setConf(state.getConf.getAllProperties)
+    if (state.out == null) state.out = new PrintStream(outputBuffer, true, "UTF-8")
+    if (state.err == null) state.err = new PrintStream(outputBuffer, true, "UTF-8")
+    Some(state)
+  }.get
 
   def hiveconf = sessionState.getConf
 
