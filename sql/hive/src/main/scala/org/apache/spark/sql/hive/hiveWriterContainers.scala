@@ -114,7 +114,8 @@ private[hive] class SparkHiveWriterContainer(
     if (doAs) {
       val ugi = UserGroupInformation.createRemoteUser(conf.value.get("hadoop.job.ugi",
         UserGroupInformation.getCurrentUser().getUserName))
-      writer = ShimLoader.getHadoopShims.doAs(ugi, new PrivilegedExceptionAction[FileSinkOperator.RecordWriter] {
+      writer = ShimLoader.getHadoopShims.doAs(
+        ugi, new PrivilegedExceptionAction[FileSinkOperator.RecordWriter] {
         def run: FileSinkOperator.RecordWriter = HiveFileFormatUtils.getHiveRecordWriter(
           conf.value,
           fileSinkConf.getTableInfo,
@@ -251,7 +252,8 @@ private[spark] class SparkHiveDynamicPartitionWriterContainer(
       if (doAs) {
         val ugi = UserGroupInformation.createRemoteUser(conf.value.get("hadoop.job.ugi",
           UserGroupInformation.getCurrentUser().getUserName))
-        ShimLoader.getHadoopShims.doAs(ugi, new PrivilegedExceptionAction[FileSinkOperator.RecordWriter] {
+        ShimLoader.getHadoopShims.doAs(
+          ugi, new PrivilegedExceptionAction[FileSinkOperator.RecordWriter] {
           def run: FileSinkOperator.RecordWriter = HiveFileFormatUtils.getHiveRecordWriter(
             conf.value,
             fileSinkConf.getTableInfo,
