@@ -224,6 +224,8 @@ class HiveContext(sc: SparkContext) extends SQLContext(sc) {
 
   protected[hive] def hiveconf = tlSession.get().asInstanceOf[this.SQLSession].hiveconf
 
+  protected[hive] def proxyUser = tlSession.get().asInstanceOf[this.SQLSession].proxyUser
+
   override def setConf(key: String, value: String): Unit = {
     super.setConf(key, value)
     runSqlHive(s"SET $key=$value")
@@ -291,6 +293,8 @@ class HiveContext(sc: SparkContext) extends SQLContext(sc) {
       }
       state
     }
+
+    protected[hive] lazy val proxyUser: String = sessionState.getUserName
   }
 
   /**

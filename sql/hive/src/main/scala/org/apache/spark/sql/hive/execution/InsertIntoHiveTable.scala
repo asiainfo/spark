@@ -176,9 +176,10 @@ case class InsertIntoHiveTable(
 
     val writerContainer = if (numDynamicPartitions > 0) {
       val dynamicPartColNames = partitionColumnNames.takeRight(numDynamicPartitions)
-      new SparkHiveDynamicPartitionWriterContainer(jobConf, fileSinkConf, dynamicPartColNames)
+      new SparkHiveDynamicPartitionWriterContainer(
+        jobConf, sc.proxyUser, fileSinkConf, dynamicPartColNames)
     } else {
-      new SparkHiveWriterContainer(jobConf, fileSinkConf)
+      new SparkHiveWriterContainer(jobConf, sc.proxyUser, fileSinkConf)
     }
 
     saveAsHiveFile(child.execute(), outputClass, fileSinkConf, jobConfSer, writerContainer)

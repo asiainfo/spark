@@ -36,6 +36,10 @@ import org.apache.spark.sql.Row
 import org.apache.spark.{Logging, SerializableWritable, SparkHadoopWriter}
 import org.apache.spark.sql.hive.{ShimFileSinkDesc => FileSinkDesc}
 import org.apache.spark.sql.hive.HiveShim._
+import org.apache.hadoop.security.UserGroupInformation
+import org.apache.hadoop.hive.shims.ShimLoader
+import java.security.PrivilegedExceptionAction
+import java.io.IOException
 
 /**
  * Internal helper class that saves an RDD using a Hive OutputFormat.
@@ -43,6 +47,7 @@ import org.apache.spark.sql.hive.HiveShim._
  */
 private[hive] class SparkHiveWriterContainer(
     @transient jobConf: JobConf,
+    proxyUser: String,
     fileSinkConf: FileSinkDesc)
   extends Logging
   with SparkHadoopMapRedUtil
@@ -57,6 +62,7 @@ private[hive] class SparkHiveWriterContainer(
     Utilities.copyTableJobPropertiesToConf(tableDesc, jobConf)
   }
   protected val conf = new SerializableWritable(jobConf)
+  protected val doAs = conf.value.get("hive.server2.enable.doAs", "false").toBoolean
 
   private var jobID = 0
   private var splitID = 0
@@ -107,13 +113,27 @@ private[hive] class SparkHiveWriterContainer(
   protected def initWriters() {
     // NOTE this method is executed at the executor side.
     // For Hive tables without partitions or with only static partitions, only 1 writer is needed.
-    writer = HiveFileFormatUtils.getHiveRecordWriter(
-      conf.value,
-      fileSinkConf.getTableInfo,
-      conf.value.getOutputValueClass.asInstanceOf[Class[Writable]],
-      fileSinkConf,
-      FileOutputFormat.getTaskOutputPath(conf.value, getOutputName),
-      Reporter.NULL)
+    if (doAs) {
+      val ugi = UserGroupInformation.createRemoteUser(proxyUser)
+      writer = ShimLoader.getHadoopShims.doAs(
+        ugi, new PrivilegedExceptionAction[FileSinkOperator.RecordWriter] {
+        def run: FileSinkOperator.RecordWriter = HiveFileFormatUtils.getHiveRecordWriter(
+          conf.value,
+          fileSinkConf.getTableInfo,
+          conf.value.getOutputValueClass.asInstanceOf[Class[Writable]],
+          fileSinkConf,
+          FileOutputFormat.getTaskOutputPath(conf.value, getOutputName),
+          Reporter.NULL)
+      })
+    } else {
+      writer = HiveFileFormatUtils.getHiveRecordWriter(
+        conf.value,
+        fileSinkConf.getTableInfo,
+        conf.value.getOutputValueClass.asInstanceOf[Class[Writable]],
+        fileSinkConf,
+        FileOutputFormat.getTaskOutputPath(conf.value, getOutputName),
+        Reporter.NULL)
+    }
   }
 
   protected def commit() {
@@ -159,9 +179,10 @@ private[spark] object SparkHiveDynamicPartitionWriterContainer {
 
 private[spark] class SparkHiveDynamicPartitionWriterContainer(
     @transient jobConf: JobConf,
+    proxyUser: String,
     fileSinkConf: FileSinkDesc,
     dynamicPartColNames: Array[String])
-  extends SparkHiveWriterContainer(jobConf, fileSinkConf) {
+  extends SparkHiveWriterContainer(jobConf, proxyUser, fileSinkConf) {
 
   import SparkHiveDynamicPartitionWriterContainer._
 
@@ -223,14 +244,28 @@ private[spark] class SparkHiveDynamicPartitionWriterContainer(
         val workPath = new Path(outputPath, dynamicPartPath.stripPrefix("/"))
         new Path(workPath, getOutputName)
       }
+      if (doAs) {
+        val ugi = UserGroupInformation.createRemoteUser(proxyUser)
+        ShimLoader.getHadoopShims.doAs(
+          ugi, new PrivilegedExceptionAction[FileSinkOperator.RecordWriter] {
+          def run: FileSinkOperator.RecordWriter = HiveFileFormatUtils.getHiveRecordWriter(
+            conf.value,
+            fileSinkConf.getTableInfo,
+            conf.value.getOutputValueClass.asInstanceOf[Class[Writable]],
+            newFileSinkDesc,
+            path,
+            Reporter.NULL)
+        })
+      } else {
+        HiveFileFormatUtils.getHiveRecordWriter(
+          conf.value,
+          fileSinkConf.getTableInfo,
+          conf.value.getOutputValueClass.asInstanceOf[Class[Writable]],
+          newFileSinkDesc,
+          path,
+          Reporter.NULL)
+      }
 
-      HiveFileFormatUtils.getHiveRecordWriter(
-        conf.value,
-        fileSinkConf.getTableInfo,
-        conf.value.getOutputValueClass.asInstanceOf[Class[Writable]],
-        newFileSinkDesc,
-        path,
-        Reporter.NULL)
     }
 
     writers.getOrElseUpdate(dynamicPartPath, newWriter())
