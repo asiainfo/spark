@@ -41,6 +41,7 @@ import org.apache.spark.sql.execution.{ExecutedCommand, ExtractPythonUdfs, Query
 import org.apache.spark.sql.hive.execution.{DescribeHiveTableCommand, HiveNativeCommand}
 import org.apache.spark.sql.sources.{DDLParser, DataSourceStrategy}
 import org.apache.spark.sql.types._
+import org.apache.hadoop.security.UserGroupInformation
 
 /**
  * An instance of the Spark SQL execution engine that integrates with data stored in Hive.
@@ -294,7 +295,10 @@ class HiveContext(sc: SparkContext) extends SQLContext(sc) {
       state
     }
 
-    protected[hive] lazy val proxyUser: String = sessionState.getUserName
+    protected[hive] lazy val proxyUser: String = sessionState.getUserName match {
+      case null => UserGroupInformation.getCurrentUser().getUserName
+      case user => user
+    }
   }
 
   /**
