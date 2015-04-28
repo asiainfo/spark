@@ -83,7 +83,7 @@ case class WindowAggregate(
         case _ => false
       }
       ComputedWindow(
-        func,
+        expr,
         wfi,
         spec,
         BindReferences.bindReference(func, child.output),

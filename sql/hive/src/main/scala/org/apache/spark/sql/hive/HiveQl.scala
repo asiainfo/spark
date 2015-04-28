@@ -716,50 +716,55 @@ https://cwiki.apache.org/confluence/display/Hive/Enhanced+Aggregation%2C+Cube%2C
             withWhere)
         }.getOrElse(withWhere)
 
+        val withDistinctAndHaving = (withProject: LogicalPlan) => {
+          val withDistinct =
+            if (selectDistinctClause.isDefined) Distinct(withProject) else withProject
+
+          havingClause.map { h =>
+            val havingExpr = h.getChildren.toSeq match { case Seq(hexpr) => nodeToExpr(hexpr) }
+            // Note that we added a cast to boolean. If the expression itself is already boolean,
+            // the optimizer will get rid of the unnecessary cast.
+            Filter(Cast(havingExpr, BooleanType), withDistinct)
+          }.getOrElse(withDistinct)
+        }
+
+
         // The projection of the query can either be a normal projection, an aggregation
         // (if there is a group by) or a script transformation.
-        val withProject: LogicalPlan = transformation.getOrElse {
+        val withSelect: LogicalPlan = transformation.map(withDistinctAndHaving).getOrElse {
           val selectExpressions =
             nameExpressions(select.getChildren.flatMap(selExprNodeToExpr).toSeq)
 
-          val groupPlan = (selectExprs: Seq[NamedExpression]) =>
-            Seq(
-              groupByClause.map(e => e match {
-                case Token("TOK_GROUPBY", children) =>
-                  // Not a transformation so must be either project or aggregation.
-                  Aggregate(children.map(nodeToExpr), selectExprs, withLateralView)
-                case _ => sys.error("Expect GROUP BY")
-              }),
-              groupingSetsClause.map(e => e match {
-                case Token("TOK_GROUPING_SETS", children) =>
-                  val(groupByExprs, masks) = extractGroupingSet(children)
-                  GroupingSets(masks, groupByExprs, withLateralView, selectExprs)
-                case _ => sys.error("Expect GROUPING SETS")
-              }),
-              rollupGroupByClause.map(e => e match {
-                case Token("TOK_ROLLUP_GROUPBY", children) =>
-                  Rollup(children.map(nodeToExpr), withLateralView, selectExprs)
-                case _ => sys.error("Expect WITH ROLLUP")
-              }),
-              cubeGroupByClause.map(e => e match {
-                case Token("TOK_CUBE_GROUPBY", children) =>
-                  Cube(children.map(nodeToExpr), withLateralView, selectExprs)
-                case _ => sys.error("Expect WITH CUBE")
-              }),
-              Some(Project(selectExprs, withLateralView))).flatten.head
+          val withGroup = (selectExprs: Seq[NamedExpression]) =>
+            withDistinctAndHaving(
+              Seq(
+                groupByClause.map(e => e match {
+                  case Token("TOK_GROUPBY", children) =>
+                    // Not a transformation so must be either project or aggregation.
+                    Aggregate(children.map(nodeToExpr), selectExprs, withLateralView)
+                  case _ => sys.error("Expect GROUP BY")
+                }),
+                groupingSetsClause.map(e => e match {
+                  case Token("TOK_GROUPING_SETS", children) =>
+                    val(groupByExprs, masks) = extractGroupingSet(children)
+                    GroupingSets(masks, groupByExprs, withLateralView, selectExprs)
+                  case _ => sys.error("Expect GROUPING SETS")
+                }),
+                rollupGroupByClause.map(e => e match {
+                  case Token("TOK_ROLLUP_GROUPBY", children) =>
+                    Rollup(children.map(nodeToExpr), withLateralView, selectExprs)
+                  case _ => sys.error("Expect WITH ROLLUP")
+                }),
+                cubeGroupByClause.map(e => e match {
+                  case Token("TOK_CUBE_GROUPBY", children) =>
+                    Cube(children.map(nodeToExpr), withLateralView, selectExprs)
+                  case _ => sys.error("Expect WITH CUBE")
+                }),
+                Some(Project(selectExprs, withLateralView))).flatten.head
+            )
 
-          windowToPlan(selectExpressions, groupPlan)
+          windowToPlan(selectExpressions, withGroup)
         }
-
-        val withDistinct =
-          if (selectDistinctClause.isDefined) Distinct(withProject) else withProject
-
-        val withHaving = havingClause.map { h =>
-          val havingExpr = h.getChildren.toSeq match { case Seq(hexpr) => nodeToExpr(hexpr) }
-          // Note that we added a cast to boolean. If the expression itself is already boolean,
-          // the optimizer will get rid of the unnecessary cast.
-          Filter(Cast(havingExpr, BooleanType), withDistinct)
-        }.getOrElse(withDistinct)
 
         val withSort =
           (orderByClause, sortByClause, distributeByClause, clusterByClause) match {
@@ -1136,12 +1141,13 @@ https://cwiki.apache.org/confluence/display/Hive/Enhanced+Aggregation%2C+Cube%2C
             "TOK_CLUSTERBY"),
           partition.getChildren.toSeq.asInstanceOf[Seq[ASTNode]])
 
-      val partitionBy = distributeByClause.orElse(clusterByClause).toSeq
-      val sortBy = clusterByClause.orElse(orderByClause).orElse(sortByClause).toSeq
+      val partitionByExpr =
+        distributeByClause.orElse(clusterByClause).toSeq.flatMap(_.getChildren.map(nodeToExpr))
+      val sortByExpr =
+        orderByClause.orElse(sortByClause).toSeq.flatMap(_.getChildren.map(nodeToSortOrder)) ++
+          clusterByClause.toSeq.flatMap(_.getChildren.map(nodeToExpr).map(SortOrder(_, Ascending)))
 
-      WindowPartition(
-        partitionBy.flatMap(_.getChildren.map(nodeToExpr)),
-        sortBy.flatMap(_.getChildren.map(nodeToSortOrder)))
+      WindowPartition(partitionByExpr, sortByExpr)
     }.getOrElse(WindowPartition(Nil, Nil))
 
     val maybeWindowFrame = rowFrame.orElse(rangeFrame).flatMap { frame =>
