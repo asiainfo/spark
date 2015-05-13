@@ -160,4 +160,4 @@ class SortMergeCompatibilitySuite extends HiveCompatibilitySuite {
     "join_star"
   )
 }
-- 
+
