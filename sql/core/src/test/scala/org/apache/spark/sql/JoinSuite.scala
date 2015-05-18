@@ -50,6 +50,7 @@ class JoinSuite extends QueryTest with BeforeAndAfterEach {
       case j: LeftSemiJoinBNL => j
       case j: CartesianProduct => j
       case j: BroadcastNestedLoopJoin => j
+      case j: BroadcastHashOuterJoin => j
       case j: BroadcastLeftSemiJoinHash => j
       case j: SortMergeJoin => j
     }
@@ -79,20 +80,35 @@ class JoinSuite extends QueryTest with BeforeAndAfterEach {
       ("SELECT * FROM testData FULL OUTER JOIN testData2 WHERE key > a", classOf[CartesianProduct]),
       ("SELECT * FROM testData JOIN testData2 ON key = a", classOf[ShuffledHashJoin]),
       ("SELECT * FROM testData JOIN testData2 ON key = a and key = 2", classOf[ShuffledHashJoin]),
-      ("SELECT * FROM testData JOIN testData2 ON key = a where key = 2", classOf[ShuffledHashJoin]),
+      ("SELECT * FROM testData JOIN testData2 ON key = a where key = 2", classOf[ShuffledHashJoin])
+      // TODO add BroadcastNestedLoopJoin
+    ).foreach { case (query, joinClass) => assertJoin(query, joinClass) }
+  }
+
+  test("broadcasted hash outer join operator selection") {
+    clearCache()
+    sql("CACHE TABLE testData")
+
+    Seq(
+      ("SELECT * FROM testData LEFT JOIN testData2 ON key = a", classOf[BroadcastHashOuterJoin]),
+      ("SELECT * FROM testData RIGHT JOIN testData2 ON key = a where key = 2",
+        classOf[BroadcastHashOuterJoin]),
+      ("SELECT * FROM testData full outer join testData2 ON key = a", classOf[HashOuterJoin])
+    ).foreach { case (query, joinClass) => assertJoin(query, joinClass) }
+
+    val tmp = conf.autoBroadcastJoinThreshold
+
+    sql(s"""SET ${SQLConf.AUTO_BROADCASTJOIN_THRESHOLD}=-1""")
+
+    Seq(
       ("SELECT * FROM testData LEFT JOIN testData2 ON key = a", classOf[HashOuterJoin]),
       ("SELECT * FROM testData RIGHT JOIN testData2 ON key = a where key = 2",
         classOf[HashOuterJoin]),
-      ("SELECT * FROM testData right join testData2 ON key = a and key = 2",
-        classOf[HashOuterJoin]),
-      ("SELECT * FROM testData full outer join testData2 ON key = a", classOf[HashOuterJoin]),
-      ("SELECT * FROM testData left JOIN testData2 ON (key * a != key + a)",
-        classOf[BroadcastNestedLoopJoin]),
-      ("SELECT * FROM testData right JOIN testData2 ON (key * a != key + a)",
-        classOf[BroadcastNestedLoopJoin]),
-      ("SELECT * FROM testData full JOIN testData2 ON (key * a != key + a)",
-        classOf[BroadcastNestedLoopJoin])
+      ("SELECT * FROM testData full outer join testData2 ON key = a", classOf[HashOuterJoin])
     ).foreach { case (query, joinClass) => assertJoin(query, joinClass) }
+
+    sql(s"""SET ${SQLConf.AUTO_BROADCASTJOIN_THRESHOLD}=-$tmp""")
+    sql("UNCACHE TABLE testData")
     try {
       conf.setConf("spark.sql.planner.sortMergeJoin", "true")
       Seq(
@@ -101,7 +117,7 @@ class JoinSuite extends QueryTest with BeforeAndAfterEach {
         ("SELECT * FROM testData JOIN testData2 ON key = a where key = 2", classOf[SortMergeJoin])
       ).foreach { case (query, joinClass) => assertJoin(query, joinClass) }
     } finally {
-      conf.setConf("spark.sql.planner.sortMergeJoin", SORTMERGEJOIN_ENABLED.toString)
+      conf.setConf("spark.sql.planner.sortMergeJoin", conf.sortMergeJoinEnabled.toString)
     }
   }
 
@@ -126,7 +142,7 @@ class JoinSuite extends QueryTest with BeforeAndAfterEach {
           classOf[BroadcastHashJoin])
       ).foreach { case (query, joinClass) => assertJoin(query, joinClass) }
     } finally {
-      conf.setConf("spark.sql.planner.sortMergeJoin", SORTMERGEJOIN_ENABLED.toString)
+      conf.setConf("spark.sql.planner.sortMergeJoin", conf.sortMergeJoinEnabled.toString)
     }
 
     sql("UNCACHE TABLE testData")
@@ -445,5 +461,34 @@ class JoinSuite extends QueryTest with BeforeAndAfterEach {
         Row(3, 1) ::
         Row(3, 2) :: Nil)
 
+  }
+
+  test("broadcasted hash outer join operator selection") {
+    clearCache()
+    sql("CACHE TABLE testData")
+    val tmp = conf.autoBroadcastJoinThreshold
+
+    Seq(
+      ("SELECT * FROM testData2 LEFT outer JOIN testData ON key = a", classOf[BroadcastHashOuterJoin]),
+      ("SELECT * FROM testData RIGHT outer JOIN testData2 ON key = a where key = 2",
+        classOf[BroadcastHashOuterJoin]),
+      ("SELECT * FROM testData full outer join testData2 ON key = a", classOf[HashOuterJoin])
+    ).foreach {
+      case (query, joinClass) => assertJoin(query, joinClass)
+    }
+
+    sql( s"""SET ${SQLConf.AUTO_BROADCASTJOIN_THRESHOLD}=-1""")
+
+    Seq(
+      ("SELECT * FROM testData2 LEFT outer JOIN testData ON key = a", classOf[HashOuterJoin]),
+      ("SELECT * FROM testData RIGHT outer JOIN testData2 ON key = a where key = 2",
+        classOf[HashOuterJoin]),
+      ("SELECT * FROM testData full outer join testData2 ON key = a", classOf[HashOuterJoin])
+    ).foreach {
+      case (query, joinClass) => assertJoin(query, joinClass)
+    }
+
+    sql( s"""SET ${SQLConf.AUTO_BROADCASTJOIN_THRESHOLD}=-$tmp""")
+    sql("UNCACHE TABLE testData")
   }
 }
